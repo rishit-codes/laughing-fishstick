@@ -89,3 +89,20 @@ class PackingItem(Base):
     is_packed = Column(Boolean, default=False)
     is_suggested = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True))
+
+class CommunityPost(Base):
+    __tablename__ = "community_posts"
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    author = Column(String(100), nullable=False)
+    avatar = Column(String(10))
+    city = Column(String(100), nullable=False)
+    country = Column(String(100), nullable=False)
+    emoji = Column(String(10))
+    title = Column(String(200), nullable=False)
+    body = Column(Text, nullable=False)
+    likes = Column(Integer, default=0)
+    comments = Column(Integer, default=0)
+    posted_at = Column(String(50))
+    cover = Column(String(200))
+    trip_id = Column(String(36), ForeignKey("trips.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True))

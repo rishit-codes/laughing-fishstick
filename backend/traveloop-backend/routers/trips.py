@@ -5,8 +5,9 @@ from sqlalchemy.future import select
 from typing import List
 from uuid import UUID
 
+from datetime import timedelta
 from database import get_db
-from models import Trip, TripStop, StopActivity, User, Activity
+from models import Trip, TripStop, StopActivity, User, Activity, City
 from schemas import TripCreate, TripOut, TripOutWithHealth, TripWithStops, BudgetSummaryOut, DeadDayOut, ActivityOut
 from auth import get_current_user
 
@@ -41,7 +42,7 @@ async def get_trip(trip_id: str, db: AsyncSession = Depends(get_db), current_use
     trip = result.scalar_one_or_none()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
-    if trip.owner_id != current_user.id:
+    if trip.owner_id != current_user.id and not trip.is_public:
         raise HTTPException(status_code=403, detail="Not authorized")
         
     stops_res = await db.execute(select(TripStop).where(TripStop.trip_id == trip_id).order_by(TripStop.stop_order))
@@ -71,8 +72,38 @@ async def get_budget(trip_id: str, db: AsyncSession = Depends(get_db), current_u
         raise HTTPException(status_code=404, detail="Trip not found")
     if trip.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-        
-    return BudgetSummaryOut(trip_id=trip_id, num_travelers=trip.num_travelers, total_budget_limit=trip.total_budget_limit, transport_total=0, accommodation_total=0, activities_total=0, grand_total=0, cost_per_person=0)
+    stops_res = await db.execute(select(TripStop).where(TripStop.trip_id == trip_id))
+    stops = stops_res.scalars().all()
+    
+    transport_total = sum(float(s.transport_cost or 0) for s in stops)
+    accommodation_total = sum(float(s.accommodation_cost or 0) for s in stops)
+    
+    stop_ids = [s.id for s in stops]
+    activities_total = 0.0
+    if stop_ids:
+        acts_res = await db.execute(
+            select(StopActivity, Activity)
+            .join(Activity, StopActivity.activity_id == Activity.id)
+            .where(StopActivity.stop_id.in_(stop_ids))
+        )
+        for sa, act in acts_res.all():
+            cost = float(sa.cost_override) if sa.cost_override is not None else float(act.avg_cost_usd or 0)
+            activities_total += cost
+            
+    grand_total = transport_total + accommodation_total + activities_total
+    num_travelers = trip.num_travelers or 1
+    cost_per_person = grand_total / num_travelers
+    
+    return BudgetSummaryOut(
+        trip_id=trip_id,
+        num_travelers=num_travelers,
+        total_budget_limit=trip.total_budget_limit,
+        transport_total=transport_total,
+        accommodation_total=accommodation_total,
+        activities_total=activities_total,
+        grand_total=grand_total,
+        cost_per_person=cost_per_person
+    )
 
 @router.get("/{trip_id}/free-days", response_model=List[DeadDayOut])
 async def get_free_days(trip_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -82,8 +113,44 @@ async def get_free_days(trip_id: str, db: AsyncSession = Depends(get_db), curren
         raise HTTPException(status_code=404, detail="Trip not found")
     if trip.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
+    stops_res = await db.execute(select(TripStop).where(TripStop.trip_id == trip_id))
+    stops = stops_res.scalars().all()
+    
+    stop_ids = [s.id for s in stops]
+    scheduled_dates = set()
+    if stop_ids:
+        acts_res = await db.execute(select(StopActivity).where(StopActivity.stop_id.in_(stop_ids)))
+        for sa in acts_res.scalars().all():
+            if sa.scheduled_date:
+                scheduled_dates.add(sa.scheduled_date)
+                
+    free_days = []
+    current_date = trip.start_date
+    while current_date <= trip.end_date:
+        if current_date not in scheduled_dates:
+            active_stop = None
+            for stop in stops:
+                if stop.arrival_date <= current_date <= stop.departure_date:
+                    active_stop = stop
+                    break
+            
+            if active_stop and active_stop.city_id:
+                city_res = await db.execute(select(City).where(City.id == active_stop.city_id))
+                city = city_res.scalar_one_or_none()
+                if city:
+                    # Suggest activities
+                    acts_res = await db.execute(select(Activity).where(Activity.city_id == city.id).limit(3))
+                    top_activities = [ActivityOut.model_validate(act) for act in acts_res.scalars().all()]
+                    
+                    free_days.append(DeadDayOut(
+                        dead_date=current_date,
+                        city_name=city.name,
+                        city_id=city.id,
+                        top_activities=top_activities
+                    ))
+        current_date += timedelta(days=1)
         
-    return []
+    return free_days
 
 @router.post("/{trip_id}/copy", response_model=TripOut)
 async def copy_trip(trip_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -91,7 +158,7 @@ async def copy_trip(trip_id: str, db: AsyncSession = Depends(get_db), current_us
     original_trip = result.scalar_one_or_none()
     if not original_trip:
         raise HTTPException(status_code=404, detail="Trip not found")
-    if original_trip.owner_id != current_user.id:
+    if original_trip.owner_id != current_user.id and not original_trip.is_public:
         raise HTTPException(status_code=403, detail="Not authorized")
         
     try:

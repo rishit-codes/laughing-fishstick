@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ export const Route = createFileRoute("/explore")({
 const CLIMATES = ["all", "tropical", "temperate", "arid", "alpine", "mediterranean"] as const;
 
 function Explore() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<"Cities" | "Activities">("Cities");
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
@@ -226,7 +227,16 @@ function Explore() {
                     <Stat label="Climate" value={activeCity.climate} />
                     <Stat label="Avg / day" value={`$${activeCity.avgDailyCostUsd}`} />
                   </div>
-                  <Button className="mt-5 w-full rounded-full" onClick={() => toast.success(`${activeCity.name} added`, { description: "Pick a trip from the list to confirm." })}>
+                  <Button
+                    className="mt-5 w-full rounded-full"
+                    onClick={() => {
+                      toast.success(`${activeCity.name} added to draft trip`);
+                      navigate({
+                        to: "/trips/new",
+                        search: { cityId: activeCity.id, cityLabel: `${activeCity.name}, ${activeCity.country}` }
+                      });
+                    }}
+                  >
                     + Add to trip
                   </Button>
                 </>
@@ -242,8 +252,22 @@ function Explore() {
                     <Stat label="Duration" value={`${activeActivity.durationHours}h`} />
                     <Stat label="Rating" value={`${activeActivity.rating}`} />
                   </div>
-                  <Button className="mt-5 w-full rounded-full" onClick={() => toast.success(`${activeActivity.name} added`)}>
-                    + Add to itinerary
+                  <Button
+                    className="mt-5 w-full rounded-full"
+                    onClick={() => {
+                      toast.success(`${activeActivity.name} added to draft trip`);
+                      const city = mockCities.find(c => c.id === activeActivity.cityId);
+                      if (city) {
+                        navigate({
+                          to: "/trips/new",
+                          search: { cityId: city.id, cityLabel: `${city.name}, ${city.country}` }
+                        });
+                      } else {
+                        navigate({ to: "/trips/new" });
+                      }
+                    }}
+                  >
+                    + Add to trip
                   </Button>
                 </>
               ) : null}

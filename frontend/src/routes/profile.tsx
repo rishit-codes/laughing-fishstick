@@ -6,13 +6,13 @@ import { TopNav } from "@/components/traveloop/TopNav";
 import { Footer } from "@/components/traveloop/Footer";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { mockCities, mockTrips, mockUser } from "@/lib/mock-data";
-import { tripDays } from "@/lib/trip-diagnostics";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/auth-context";
+import { useTrips } from "@/hooks/use-api";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({ meta: [
-    { title: `${mockUser.name} — Traveloop profile` },
+    { title: `Traveloop profile` },
     { name: "description", content: "Your travel profile: stats, visited places, plans, guides and journals." },
   ]}),
   component: ProfilePage,
@@ -29,18 +29,50 @@ const visited = [
   { city: "Cape Town", country: "South Africa", emoji: "🇿🇦", year: 2020 },
 ];
 
+function getTripDaysLength(start: string, end: string) {
+  const s = new Date(start);
+  const e = new Date(end);
+  const diffTime = Math.max(0, e.getTime() - s.getTime());
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+}
+
 function ProfilePage() {
   const [following, setFollowing] = useState(false);
-  const totalDays = mockTrips.reduce((a, t) => a + tripDays(t).length, 0);
-  const cities = mockTrips.reduce((a, t) => a + t.stops.length, 0) + visited.length;
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { data: trips = [] } = useTrips();
+
+  const totalDays = trips.reduce((a, t) => a + getTripDaysLength(t.start_date, t.end_date), 0);
+  const cities = trips.length + visited.length;
   const countries = new Set(visited.map(v => v.country)).size;
 
   const stats = [
     { label: "Countries", value: countries, icon: Globe2, hint: "across 4 continents" },
     { label: "Cities", value: cities, hint: "explored & planned", icon: MapPin },
-    { label: "Trips", value: mockTrips.length + 6, hint: "completed", icon: Compass },
+    { label: "Trips", value: trips.length + 6, hint: "completed", icon: Compass },
     { label: "Travel days", value: totalDays + 84, hint: "lifetime", icon: Calendar },
   ];
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="max-w-md text-center text-muted-foreground">Rehydrating your session...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="max-w-md text-center">
+          <div className="font-display text-4xl">Sign in required</div>
+          <p className="mt-3 text-muted-foreground">Your profile requires an authenticated session.</p>
+          <div className="mt-6">
+            <Button asChild className="rounded-full"><Link to="/login">Go to login</Link></Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -55,13 +87,13 @@ function ProfilePage() {
           <div className="relative">
             <div className="absolute -inset-1 rounded-full bg-gradient-to-br from-primary/40 via-signal/30 to-forest/30 blur-xl" aria-hidden />
             <div className="relative inline-flex h-32 w-32 items-center justify-center rounded-full bg-secondary text-6xl ring-4 ring-background shadow-[0_24px_48px_-24px_oklch(0.18_0.01_60/0.35)]">
-              {mockUser.avatar}
+              {user.name.charAt(0).toUpperCase()}
             </div>
           </div>
           <div className="min-w-0">
             <div className="text-xs uppercase tracking-widest text-muted-foreground">Traveler since 2020</div>
-            <h1 className="mt-1 font-display text-6xl leading-none">{mockUser.name} <em className="text-primary">Rao</em></h1>
-            <div className="mt-2 font-mono text-sm text-muted-foreground">@aanya</div>
+            <h1 className="mt-1 font-display text-6xl leading-none">{user.name.split(" ")[0]} <em className="text-primary">{user.name.split(" ").slice(1).join(" ")}</em></h1>
+            <div className="mt-2 font-mono text-sm text-muted-foreground">@{user.name.toLowerCase().replace(/\s/g, "")}</div>
             <p className="mt-4 max-w-xl text-pretty text-foreground/80">
               Slow traveler. Coffee cartographer. Currently chasing coastlines from Lisbon to Cape Town —
               one custard tart at a time.
@@ -186,23 +218,23 @@ function ProfilePage() {
           <TabsContent value="preplanned" className="mt-6">
             <div className="mb-4 text-sm text-muted-foreground">Trips you have planned for the future.</div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              {mockTrips.filter(t => new Date(t.startDate) >= new Date()).map((t) => (
+              {trips.filter(t => new Date(t.start_date) >= new Date()).map((t) => (
                 <Link
                   key={t.id}
                   to="/trips/$tripId"
                   params={{ tripId: t.id }}
                   className="lift group overflow-hidden rounded-2xl border border-border bg-card"
                 >
-                  <div className="h-28" style={{ backgroundImage: t.cover }} />
+                  <div className="h-28 bg-cover bg-center" style={{ backgroundImage: t.cover_photo_url ? `url(${t.cover_photo_url})` : "linear-gradient(135deg, oklch(0.78 0.13 60), oklch(0.55 0.17 28))" }} />
                   <div className="p-5">
-                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t.stops.length} stops</div>
-                    <div className="mt-1 font-display text-xl leading-tight">{t.name}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">{t.tagline}</div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t.num_travelers} travelers</div>
+                    <div className="mt-1 font-display text-xl leading-tight">{t.title}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t.description || "No description"}</div>
                     <div className="mt-3 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-primary">Upcoming</div>
                   </div>
                 </Link>
               ))}
-              {mockTrips.filter(t => new Date(t.startDate) >= new Date()).length === 0 && (
+              {trips.filter(t => new Date(t.start_date) >= new Date()).length === 0 && (
                 <div className="col-span-3 rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
                   No upcoming trips yet.
                   <Link to="/trips/new" className="ml-2 text-primary hover:underline">Plan one →</Link>
@@ -214,23 +246,23 @@ function ProfilePage() {
           <TabsContent value="previous" className="mt-6">
             <div className="mb-4 text-sm text-muted-foreground">Trips you've completed — memories archived clean.</div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              {mockTrips.filter(t => new Date(t.endDate) < new Date()).map((t) => (
+              {trips.filter(t => new Date(t.end_date) < new Date()).map((t) => (
                 <Link
                   key={t.id}
                   to="/trips/$tripId"
                   params={{ tripId: t.id }}
                   className="lift group overflow-hidden rounded-2xl border border-border bg-card"
                 >
-                  <div className="h-28" style={{ backgroundImage: t.cover }} />
+                  <div className="h-28 bg-cover bg-center" style={{ backgroundImage: t.cover_photo_url ? `url(${t.cover_photo_url})` : "linear-gradient(135deg, oklch(0.78 0.13 60), oklch(0.55 0.17 28))" }} />
                   <div className="p-5">
-                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t.stops.length} stops</div>
-                    <div className="mt-1 font-display text-xl leading-tight">{t.name}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">{t.tagline}</div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t.num_travelers} travelers</div>
+                    <div className="mt-1 font-display text-xl leading-tight">{t.title}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t.description || "No description"}</div>
                     <div className="mt-3 inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">Completed</div>
                   </div>
                 </Link>
               ))}
-              {mockTrips.filter(t => new Date(t.endDate) < new Date()).length === 0 && (
+              {trips.filter(t => new Date(t.end_date) < new Date()).length === 0 && (
                 <div className="col-span-3 rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
                   No completed trips yet — go somewhere!
                 </div>
@@ -272,8 +304,6 @@ function ProfilePage() {
           <p className="mt-2 text-xs text-muted-foreground">
             Tip: explore more in <Link to="/explore" className="text-primary hover:underline">Cities</Link>.
           </p>
-          {/* mockCities used for type-safety reference */}
-          <span className="hidden">{mockCities.length}</span>
         </section>
       </main>
       <Footer />

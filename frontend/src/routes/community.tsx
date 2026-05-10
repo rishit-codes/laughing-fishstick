@@ -8,9 +8,17 @@ import { Footer } from "@/components/traveloop/Footer";
 import { Toolbar } from "@/components/traveloop/Toolbar";
 import { Button } from "@/components/ui/button";
 import { type ApiCommunityPost } from "@/lib/api";
-import { useCommunity } from "@/hooks/use-api";
+import { useCommunity, useCopyTrip, useTrip } from "@/hooks/use-api";
 import { useAuth } from "@/lib/auth-context";
 import { Link } from "@tanstack/react-router";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export const Route = createFileRoute("/community")({
   head: () => ({ meta: [
@@ -161,12 +169,12 @@ function Community() {
 }
 
 function PostCard({ post, liked, onLike, delay }: { post: ApiCommunityPost; liked: boolean; onLike: () => void; delay: number }) {
-  return (
+  const CardContent = (
     <motion.article
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay }}
-      className="lift overflow-hidden rounded-3xl border border-border bg-card"
+      className="lift overflow-hidden rounded-3xl border border-border bg-card h-full flex flex-col"
     >
       <div className="grain relative h-36" style={{ background: post.cover }}>
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent" />
@@ -189,7 +197,10 @@ function PostCard({ post, liked, onLike, delay }: { post: ApiCommunityPost; like
         <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-3 text-sm">
           <div className="flex items-center gap-3 text-muted-foreground">
             <button
-              onClick={onLike}
+              onClick={(e) => {
+                e.stopPropagation();
+                onLike();
+              }}
               className={`inline-flex items-center gap-1.5 transition ${liked ? "text-alert" : "hover:text-foreground"}`}
               aria-label="Like"
             >
@@ -202,7 +213,10 @@ function PostCard({ post, liked, onLike, delay }: { post: ApiCommunityPost; like
             </span>
           </div>
           <button
-            onClick={() => toast.success("Link copied")}
+            onClick={(e) => {
+              e.stopPropagation();
+              toast.success("Link copied");
+            }}
             className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
             aria-label="Share"
           >
@@ -211,5 +225,90 @@ function PostCard({ post, liked, onLike, delay }: { post: ApiCommunityPost; like
         </div>
       </div>
     </motion.article>
+  );
+
+  if (!post.tripId) {
+    return CardContent;
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <div className="cursor-pointer h-full">{CardContent}</div>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">{post.title}</DialogTitle>
+          <div className="text-sm text-muted-foreground mt-2">
+            Itinerary for {post.city}, {post.country} by {post.author}
+          </div>
+        </DialogHeader>
+        <TripItineraryPreview tripId={post.tripId} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TripItineraryPreview({ tripId }: { tripId: string }) {
+  const { data: trip, isLoading } = useTrip(tripId);
+  const copyTrip = useCopyTrip();
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4 py-6">
+        <Skeleton className="h-20 w-full rounded-2xl" />
+        <Skeleton className="h-20 w-full rounded-2xl" />
+      </div>
+    );
+  }
+
+  if (!trip) {
+    return <div className="py-6 text-center text-muted-foreground">Itinerary details not found.</div>;
+  }
+
+  const sortedStops = [...trip.stops].sort((a, b) => new Date(a.arrival_date).getTime() - new Date(b.arrival_date).getTime());
+
+  return (
+    <div className="mt-4">
+      {trip.description && (
+        <div className="mb-6 rounded-2xl bg-primary/5 p-4 text-sm text-foreground/90 border border-primary/10">
+          <p className="font-medium mb-2 text-primary">Highlights & Must-Dos</p>
+          <p className="whitespace-pre-wrap leading-relaxed">{trip.description}</p>
+        </div>
+      )}
+      <div className="space-y-4">
+        {sortedStops.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No stops recorded for this trip.</div>
+        ) : (
+          sortedStops.map((stop, i) => (
+            <div key={stop.id} className="rounded-2xl border border-border p-4 bg-secondary/30">
+              <div className="text-xs uppercase tracking-widest text-muted-foreground">Stop {i + 1}</div>
+              <div className="mt-1 font-medium">{stop.arrival_date} to {stop.departure_date}</div>
+              {stop.accommodation_name && (
+                <div className="mt-2 text-sm text-muted-foreground">
+                  Stay: {stop.accommodation_name}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+      
+      <div className="mt-6 pt-6 border-t border-border">
+        <Button 
+          className="w-full rounded-full" 
+          onClick={() => {
+            toast.promise(copyTrip.mutateAsync(tripId), {
+              loading: 'Copying itinerary...',
+              success: 'Itinerary copied to your trips! You can find it in your Profile.',
+              error: 'Failed to copy itinerary.'
+            });
+          }}
+          disabled={copyTrip.isPending}
+        >
+          {copyTrip.isPending ? "Copying..." : "Copy Itinerary to My Trips"}
+        </Button>
+      </div>
+    </div>
   );
 }

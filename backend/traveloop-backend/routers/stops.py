@@ -4,8 +4,9 @@ from sqlalchemy.future import select
 from typing import List, Dict, Any
 from uuid import UUID
 
+from datetime import timedelta
 from database import get_db
-from models import Trip, TripStop, User
+from models import Trip, TripStop, User, Activity, StopActivity
 from schemas import StopCreate, StopOut, StopUpdate
 from auth import get_current_user
 
@@ -44,6 +45,24 @@ async def create_stop(trip_id: str, stop_in: StopCreate, db: AsyncSession = Depe
         flight_number=stop_in.flight_number
     )
     db.add(new_stop)
+    await db.flush()
+    
+    # Auto-generate itinerary plan
+    activities_res = await db.execute(select(Activity).where(Activity.city_id == stop_in.city_id))
+    activities = activities_res.scalars().all()
+    if activities:
+        duration_days = (stop_in.departure_date - stop_in.arrival_date).days + 1
+        current_date = stop_in.arrival_date
+        for i, act in enumerate(activities):
+            act_date = current_date + timedelta(days=(i % duration_days))
+            new_sa = StopActivity(
+                stop_id=new_stop.id,
+                activity_id=act.id,
+                scheduled_date=act_date,
+                scheduled_time="10:00:00"
+            )
+            db.add(new_sa)
+            
     await db.commit()
     await db.refresh(new_stop)
     

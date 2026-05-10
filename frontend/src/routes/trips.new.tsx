@@ -9,6 +9,12 @@ import { stopsApi } from "@/lib/api";
 import { useCitySearch, useCreateTrip } from "@/hooks/use-api";
 
 export const Route = createFileRoute("/trips/new")({
+  validateSearch: (search: Record<string, unknown>): { cityId?: number; cityLabel?: string } => {
+    return {
+      cityId: search.cityId ? Number(search.cityId) : undefined,
+      cityLabel: search.cityLabel ? String(search.cityLabel) : undefined,
+    };
+  },
   head: () => ({ meta: [{ title: "New trip — Traveloop" }] }),
   component: NewTrip,
 });
@@ -37,7 +43,22 @@ function NewTrip() {
   const [budget, setBudget] = useState("");
   const [status, setStatus] = useState("draft");
   const [cityQuery, setCityQuery] = useState("");
-  const [stops, setStops] = useState<DraftStop[]>([]);
+  const searchParams = Route.useSearch();
+  const [stops, setStops] = useState<DraftStop[]>(() => {
+    if (searchParams.cityId && searchParams.cityLabel) {
+      return [{
+        city_id: searchParams.cityId,
+        city_label: searchParams.cityLabel,
+        arrival_date: "",
+        departure_date: "",
+        accommodation_name: "",
+        accommodation_cost: "",
+        transport_type: "",
+        transport_cost: "",
+      }];
+    }
+    return [];
+  });
   const [formError, setFormError] = useState<string | null>(null);
 
   const { data: cityResults, isLoading: cityLoading } = useCitySearch(cityQuery);
